@@ -1,4 +1,4 @@
-var ImageCache: any = {};
+var ImageCache: { [name: string]: HTMLImageElement } = {};
 
 namespace L {
 	export interface GeoJsonLayerOptions extends GeoJSONOptions {
