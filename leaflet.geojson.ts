@@ -2,6 +2,7 @@ var ImageCache: { [name: string]: HTMLImageElement } = {};
 
 namespace L {
 	export interface GeoJsonLayerOptions extends GeoJSONOptions {
+		id: string,
 		markersInheritOptions: boolean
 		pane: string
 		refreshIntervalSeconds: number;
@@ -9,9 +10,10 @@ namespace L {
 
 	export abstract class GeoJsonLayer<P = any> extends L.GeoJSON {
 		options: GeoJsonLayerOptions = {
-				markersInheritOptions: false,
-				pane: 'overlayPane',
-				refreshIntervalSeconds: 60*30
+			id: null,
+			markersInheritOptions: false,
+			pane: 'overlayPane',
+			refreshIntervalSeconds: 60 * 30
 		}
 		_url: string
 		_map: L.Map

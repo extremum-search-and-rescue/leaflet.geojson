@@ -5,6 +5,7 @@ var L;
         constructor(url, options) {
             super(null, options);
             this.options = {
+                id: null,
                 markersInheritOptions: false,
                 pane: 'overlayPane',
                 refreshIntervalSeconds: 60 * 30
