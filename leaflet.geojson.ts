@@ -1,42 +1,55 @@
 var ImageCache: { [name: string]: HTMLImageElement } = {};
 
 namespace L {
-	export interface GeoJsonLayerOptions extends GeoJSONOptions {
-		id: string,
-		markersInheritOptions: boolean
-		pane: string
-		refreshIntervalSeconds: number;
+	export interface Canvas extends L.Renderer {
+		_bounds: L.Bounds;
+		_ctx: CanvasRenderingContext2D
 	}
 
+	export interface GeoJsonLayerOptions extends GeoJSONOptions {
+		id?: string
+		shortcut?: string
+		markersInheritOptions?: boolean
+		pane?: string
+		refreshIntervalSeconds?: number;
+		minZoom?: number;
+		maxZoom?: number;
+		onEachFeature?(feature: GeoJSON.Feature<GeoJSON.Geometry, any>, layer: L.Layer, parentLayer?: L.GeoJsonLayer): void
+		style?(feature: GeoJSON.Feature<GeoJSON.Geometry>): L.PathOptions
+		icons?: Array<string>
+		bounds?: L.LatLngBounds
+	}
+	export interface GeoJsonLayer<P = any> extends L.GeoJSON {
+		afterInit?(map: L.Map): void
+	}
 	export abstract class GeoJsonLayer<P = any> extends L.GeoJSON {
-		options: GeoJsonLayerOptions = {
+		override options: GeoJsonLayerOptions = {
 			id: null,
 			markersInheritOptions: false,
 			pane: 'overlayPane',
-			refreshIntervalSeconds: 60 * 30
+			refreshIntervalSeconds: 60 * 30,
+			onEachFeature: null
 		}
 		_url: string
-		_map: L.Map
-		afterInit?: (map: L.Map) => void
+		protected override _map: L.Map
 		_refreshIntervalId: number
 		_renderer: L.Renderer
 		_layers: {};
 
-		constructor(url: any, options: GeoJsonLayerOptions) {
+		constructor(url: string, options: GeoJsonLayerOptions) {
 			super(null, options);
-			this._url = url as string;
+			this._url = url;
 			L.Util.extend(this.options, options);
 		}
 
-		initialize(url: any, options) {
+		override initialize(url: any, options: L.GeoJsonLayerOptions) {
 			this._url = url as string;
 			super.initialize(null, options);
 			L.Util.setOptions(this, this.options);
-			this.options.onEachFeature = this.onEachFeature;
 			this.options.style = this.style;
 			this.options.filter = this.filter;
 		}
-		onAdd(map: L.Map): this {
+		override onAdd(map: L.Map): this {
 			super.onAdd(map);
 			if (this.afterInit) this.afterInit(map);
 			this._map = map;
@@ -48,7 +61,7 @@ namespace L {
 			this.refresh();
 			return this;
 		}
-		onRemove(map:L.Map) : this {
+		override onRemove(map:L.Map) : this {
 			clearInterval(this._refreshIntervalId);
 			this.clearLayers();
 			map.off('themechanged', this.redraw, this);
@@ -56,15 +69,13 @@ namespace L {
 			this._map = null;
 			return this;
 		}
-		style(feature) {
+		style(feature: GeoJSON.Feature<GeoJSON.Geometry>): L.PathOptions {
 			return {};
 		}
-		filter (feature) {
+		filter(feature: GeoJSON.Feature<GeoJSON.Geometry>): boolean {
 			return true;
 		}
-		onEachFeature (feature, layer) {
-			return {};
-		}
+
 		redraw(): this{
 			const keys = Object.keys(this._layers);
 			if (keys.length > 0) {
@@ -99,7 +110,7 @@ namespace L {
 			}
 		}
 
-		override addData (geojson) {
+		override addData(geojson: GeoJSON.GeoJsonObject) {
 			var features = Array.isArray(geojson) ? geojson : geojson.features,
 				i, len, feature;
 
@@ -122,20 +133,20 @@ namespace L {
 			if (!layer) {
 				return this;
 			}
-			layer.feature = L.GeoJSON<P>.asFeature(geojson);
+			layer.feature = L.GeoJSON.asFeature(geojson);
 
 			layer.defaultOptions = layer.options;
 			this.resetStyle(layer);
 
 			if (options.onEachFeature) {
-				options.onEachFeature(geojson, layer);
+				options.onEachFeature(geojson, layer, this);
 			}
 
 			return this.addLayer(layer);
 		}
-		abstract pointToLayer(geojson, latlng): any;
+		abstract pointToLayer(geojson: GeoJSON.Feature<GeoJSON.Point>, latlng: L.LatLng): any;
 
-		geometryToLayer (geojson, options) {
+		geometryToLayer(geojson: GeoJSON.Feature<GeoJSON.GeometryObject> | GeoJSON.FeatureCollection<GeoJSON.GeometryObject>, options ?: GeoJSONOptions): L.Layer {
 
 			var geometry = geojson.type === 'Feature' ? geojson.geometry : geojson,
 				coords = geometry ? geometry.coordinates : null,
