@@ -19,17 +19,11 @@ namespace L {
 		icons?: Array<string>
 		bounds?: L.LatLngBounds
 	}
-	export interface GeoJsonLayer<P = any> extends L.GeoJSON {
+	export interface GeoJsonLayer<P = any> extends L.GeoJSON<P> {
 		afterInit?(map: L.Map): void
 	}
-	export abstract class GeoJsonLayer<P = any> extends L.GeoJSON {
-		override options: GeoJsonLayerOptions = {
-			id: null,
-			markersInheritOptions: false,
-			pane: 'overlayPane',
-			refreshIntervalSeconds: 60 * 30,
-			onEachFeature: null
-		}
+	export abstract class GeoJsonLayer<P = any> extends L.GeoJSON<P> {
+		override options: GeoJsonLayerOptions; 
 		_url: string
 		protected override _map: L.Map
 		_refreshIntervalId: number
@@ -37,9 +31,16 @@ namespace L {
 		_layers: {};
 
 		constructor(url: string, options: GeoJsonLayerOptions) {
+			options = {... {
+					id: null,
+					markersInheritOptions: false,
+					pane: 'overlayPane',
+					refreshIntervalSeconds: 60 * 30,
+					onEachFeature: null
+				}, ...options
+			};
 			super(null, options);
 			this._url = url;
-			L.Util.extend(this.options, options);
 		}
 
 		override initialize(url: any, options: L.GeoJsonLayerOptions) {
@@ -58,7 +59,7 @@ namespace L {
 				this._refreshIntervalId = setInterval(function(){self.refresh()}, this.options.refreshIntervalSeconds * 1000);
 			}
 			map.on('themechanged',this.redraw, this);
-			this.refresh();
+			this.refresh(true);
 			return this;
 		}
 		override onRemove(map:L.Map) : this {
@@ -85,9 +86,10 @@ namespace L {
 			
 			return this;
 		}
-		refresh () {
+		refresh (forcedRefresh?: boolean) {
 			if (!this._map) return;
 			if (!this._map.hasLayer(this)) return;
+            if (!forcedRefresh && document.hidden) return;
 
 			setTimeout(() => this.requestDataFromServer(this._url),0);
 		}
@@ -101,9 +103,11 @@ namespace L {
 				if (xmlhttp.readyState == 4 && xmlhttp.status == 200) {
 					try {
 						var geojson = JSON.parse(xmlhttp.responseText);
-						self.clearLayers();
-						self.addData(geojson);
-					} catch (err) {
+                        requestAnimationFrame(() => {
+							self.clearLayers();
+                            self.addData(geojson);
+                        });
+                    } catch (err) {
 						console.error(err);
 					}
 				}
