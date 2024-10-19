@@ -17,7 +17,8 @@ namespace L {
 		onEachFeature?(feature: GeoJSON.Feature<GeoJSON.Geometry, any>, layer: L.Layer, parentLayer?: L.GeoJsonLayer): void
 		style?(feature: GeoJSON.Feature<GeoJSON.Geometry>): L.PathOptions
 		icons?: Array<string>
-		bounds?: L.LatLngBounds
+		bounds?: L.LatLngBounds,
+		subdomains?: Array<string>
 	}
 	export interface GeoJsonLayer<P = any> extends L.GeoJSON<P> {
 		afterInit?(map: L.Map): void
@@ -27,6 +28,8 @@ namespace L {
 		_url: string
 		protected override _map: L.Map
 		_refreshIntervalId: number
+		_refreshCancellation: AbortController
+		_refreshAbortTimeout: number;
 		_renderer: L.Renderer
 		_layers: {};
 
@@ -47,8 +50,8 @@ namespace L {
 			this._url = url as string;
 			super.initialize(null, options);
 			L.Util.setOptions(this, this.options);
-			this.options.style = this.style;
-			this.options.filter = this.filter;
+			this.options.style = this.options.style || this.style;
+			this.filter = this.options.filter || this.filter;
 		}
 		override onAdd(map: L.Map): this {
 			super.onAdd(map);
@@ -56,7 +59,17 @@ namespace L {
 			this._map = map;
 			const self = this;
 			if (this.options.refreshIntervalSeconds) {
-				this._refreshIntervalId = setInterval(function(){self.refresh()}, this.options.refreshIntervalSeconds * 1000);
+				const onDataRefreshTimeout = function () {
+					try {
+						self.refresh();
+					}
+					finally {
+						self._refreshIntervalId = setTimeout(onDataRefreshTimeout,
+							self.options.refreshIntervalSeconds * 1000);
+					}
+				};
+				this._refreshIntervalId = setTimeout(onDataRefreshTimeout,
+					self.options.refreshIntervalSeconds * 1000);
 			}
 			map.on('themechanged',this.redraw, this);
 			this.refresh(true);
@@ -67,6 +80,9 @@ namespace L {
 			this.clearLayers();
 			map.off('themechanged', this.redraw, this);
 			super.onRemove(map);
+			clearTimeout(this._refreshAbortTimeout);
+			this._refreshCancellation?.abort("AbortError: layer.remove");
+			this._refreshCancellation = null;
 			this._map = null;
 			return this;
 		}
@@ -90,28 +106,52 @@ namespace L {
 			if (!this._map) return;
 			if (!this._map.hasLayer(this)) return;
             if (!forcedRefresh && document.hidden) return;
-
-			setTimeout(() => this.requestDataFromServer(this._url),0);
-		}
-		requestDataFromServer (url:string): void {
-			const self = this;
-			var xmlhttp = new XMLHttpRequest();
-			xmlhttp.open('GET', url, true);
-			xmlhttp.withCredentials = true;
-			xmlhttp.send();
-			xmlhttp.onreadystatechange = function () {
-				if (xmlhttp.readyState == 4 && xmlhttp.status == 200) {
-					try {
-						var geojson = JSON.parse(xmlhttp.responseText);
-                        requestAnimationFrame(() => {
-							self.clearLayers();
-                            self.addData(geojson);
-                        });
-                    } catch (err) {
-						console.error(err);
-					}
-				}
+			let url = L.Util.template(this._url, { s: this.options.subdomains })
+			if (forcedRefresh || !this._refreshCancellation) {
+				this.requestDataFromServer(url);
 			}
+		}
+
+		requestDataFromServer(url: string): void {
+			const timeout = Math.min(
+				Math.max(this.options.refreshIntervalSeconds - 1, 10),
+				60)
+				* 1000;
+
+			const self = this;
+
+			this._refreshCancellation = new AbortController();
+			this._refreshAbortTimeout = setTimeout(() => {
+				if (!this || !this._refreshCancellation) return;
+				this._refreshCancellation.abort("AbortError: timeout in leaflet.geojson")
+			}, timeout);
+
+			fetch(url, {
+				method: 'get',
+				mode: 'cors',
+				signal: this._refreshCancellation.signal,
+				credentials: 'include',
+				priority: 'low'
+			}).then((response) => {
+				clearTimeout(this._refreshAbortTimeout);
+				this._refreshCancellation = null;
+
+				if (!response || response.status !== 200) return;
+
+				response.json()
+					.then((geojson) =>
+					requestAnimationFrame(() => {
+						self.clearLayers();
+						self.addData(geojson);
+					})).catch(err => console.log(err));
+			}).catch(err => {
+				if (!(err instanceof DOMException)) {
+					console.log(err);
+					
+				}
+				clearTimeout(this._refreshAbortTimeout);
+				this._refreshCancellation = null;
+			});
 		}
 
 		override addData(geojson: GeoJSON.GeoJsonObject) {
